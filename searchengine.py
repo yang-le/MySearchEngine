@@ -1,9 +1,10 @@
 import urllib2
+import jieba
 from BeautifulSoup import *
 from urlparse import urljoin
 from pysqlite2 import dbapi2 as sqlite
 
-ignorewords=set(['the', 'of', 'to', 'and', 'a', 'an', 'in', 'is', 'it'])
+ignorewords=set(['the', 'of', 'to', 'and', 'a', 'an', 'in', 'is', 'it', ' ', '\n', '\t', "'"])
 
 class crawler:
 	def __init__(self, dbname):
@@ -52,8 +53,12 @@ class crawler:
 			return v.strip()		
 
 	def separatewords(self, text):
-		splitter=re.compile('\\W*')
-		return [s.lower() for s in splitter.split(text) if s!='']
+#			splitter=re.compile('\\W*')
+#			return [s.lower() for s in splitter.split(text) if s!='']
+		result=list(jieba.cut_for_search(text))
+		print result
+		return result
+#			return list(jieba.cut_for_search(text))
 
 	def isindexed(self, url):
 		u=self.con.execute("select rowid from urllist where url='%s'" % url).fetchone()
@@ -103,6 +108,25 @@ class crawler:
 		self.con.execute('create index urlfromidx on link(fromid)')
 		self.dbcommit()
 
+	def calculatepagerank(self, iterations=20):
+		self.con.execute('drop table if exists pagerank')
+		self.con.execute('create table pagerank(urlid primary key, score)')
+		
+		self.con.execute('insert into pagerank select rowid, 1.0 from urllist')
+		self.dbcommit()
+
+		for i in range(iterations):
+			print "Iteration %d" % (i)
+			for (urlid,) in self.con.execute('select rowid from urllist'):
+				pr=0.15
+				
+				for (linker,) in self.con.execute('select distinct fromid from link where toid=%d' % urlid):
+					linkingpr=self.con.execute('select score from pagerank where urlid=%d' % linker).fetchone()[0]
+					linkingcount=self.con.execute('select count(*) from link where fromid=%d' % linker).fetchone()[0]
+					pr += 0.85 * (linkingpr / linkingcount)
+				self.con.execute('update pagerank set score=%f where urlid=%d' % (pr, urlid))
+			self.dbcommit()
+
 class searcher:
 	def __init__(self, dbname):
 		self.con=sqlite.connect(dbname)
@@ -145,6 +169,7 @@ class searcher:
 			,(1.5, self.locationscore(rows))
 			,(1.0, self.distancescore(rows))
 			,(1.0, self.inboundlinkscore(rows))
+			,(1.5, self.pagerankscore(rows))
 		]
 
 		for (weight, scores) in weights:
@@ -200,4 +225,8 @@ class searcher:
 		uniqueurls=set([row[0] for row in rows])
 		inboundcount=dict([(u, self.con.execute('select count(*) from link where toid=%d' % u).fetchone()[0]) for u in uniqueurls])
 		return self.normalizescores(inboundcount)
+
+	def pagerankscore(self, rows):
+		pageranks=dict([(row[0], self.con.execute('select score from pagerank where urlid=%d' % row[0]).fetchone()[0]) for row in rows])
+		return self.normalizescores(pageranks)
 

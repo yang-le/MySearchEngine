@@ -1,8 +1,9 @@
 import searchengine
 pagelist=[
-	 'http://www.guokr.com'
+	 'https://www.guokr.com'
 	,'http://www.zhihu.com'
 	,'http://www.douban.com'
+	,'https://zh.wikipedia.org'
 ]
 
 crawler=searchengine.crawler('searchindex.db')
